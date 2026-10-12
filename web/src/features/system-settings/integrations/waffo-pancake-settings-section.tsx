@@ -26,7 +26,6 @@ import { Combobox } from '@/components/ui/combobox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { getPaymentErrorTranslation } from '@/features/wallet/lib/payment'
 import { handleServerError } from '@/lib/handle-server-error'
 
 import { removeTrailingSlash } from './utils'
@@ -160,9 +159,7 @@ export function WaffoPancakeSettingsSection({
         ) {
           stores = (body.data as { stores: CatalogStore[] }).stores ?? []
         } else {
-          const reason =
-            getPaymentErrorTranslation(body) ??
-            (typeof body?.data === 'string' ? body.data : undefined)
+          const reason = typeof body?.data === 'string' ? body.data : undefined
           handleServerError(body, undefined, {
             title: reason
               ? `${t('Credentials verification failed')}: ${reason}`
@@ -326,7 +323,6 @@ export function WaffoPancakeSettingsSection({
       }
       const reason =
         errData?.error ??
-        getPaymentErrorTranslation(body) ??
         (typeof body?.data === 'string' ? body.data : undefined)
       handleServerError(body, undefined, {
         title: reason

@@ -54,16 +54,7 @@ function FooterLinkItem(props: { link: FooterLink }) {
   const label = t(props.link.text)
 
   if (isExternal) {
-    return (
-      <a
-        href={props.link.href}
-        target='_blank'
-        rel='noopener noreferrer'
-        className='text-muted-foreground hover:text-foreground text-sm transition-colors duration-200'
-      >
-        {label}
-      </a>
-    )
+    return null
   }
 
   return (
@@ -125,17 +116,14 @@ function LegalLinks(props: { leadingSeparator?: boolean }) {
 // row. inline=false wraps in a centered/right-aligned div (default).
 function ProjectAttribution(props: { currentYear: number; inline?: boolean }) {
   const { t } = useTranslation()
+  const { systemName } = useSystemConfig()
+  const displayName = systemName || '晤创AI'
   const content = (
     <span className='text-muted-foreground/45'>
       &copy; {props.currentYear}{' '}
-      <a
-        href='https://github.com/QuantumNous/new-api'
-        target='_blank'
-        rel='noopener noreferrer'
-        className='text-foreground/70 hover:text-foreground font-medium transition-colors'
-      >
-        {t('New API')}
-      </a>
+      <span className='text-foreground/70 font-medium'>
+        {displayName}
+      </span>
       . {t(NEW_API_FOOTER_ATTRIBUTION_KEY)}
     </span>
   )
@@ -159,7 +147,7 @@ export function Footer(props: FooterProps) {
   } = useSystemConfig()
 
   const displayLogo = systemLogo || props.logo || '/logo.png'
-  const displayName = systemName || props.name || 'New API'
+  const displayName = systemName || props.name || '晤创AI'
   const isDemoSiteMode = Boolean(demoSiteEnabled)
   const currentYear = new Date().getFullYear()
 

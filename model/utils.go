@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -51,7 +52,7 @@ func addNewRecord(type_ int, id int, value int) {
 
 	sum := old + value
 	if (value > 0 && sum < old) || (value < 0 && sum > old) {
-		common.SysError(common.LogText("batch update overflow: type=%d id=%d old=%d value=%d", type_, id, old, value))
+		common.SysError(fmt.Sprintf("batch update overflow: type=%d id=%d old=%d value=%d", type_, id, old, value))
 		if value > 0 {
 			sum = math.MaxInt
 		} else {
@@ -78,7 +79,7 @@ func batchUpdate() {
 		return
 	}
 
-	common.SysLog(common.LogText("batch update started"))
+	common.SysLog("batch update started")
 	stores := make([]map[int]int, BatchUpdateTypeCount)
 	for i := range BatchUpdateTypeCount {
 		batchUpdateLocks[i].Lock()
@@ -96,7 +97,7 @@ func batchUpdate() {
 			case BatchUpdateTypeTokenQuota:
 				err := increaseTokenQuota(key, value)
 				if err != nil {
-					common.SysLog(common.LogText("failed to batch update token quota: %s", err.Error()))
+					common.SysLog("failed to batch update token quota: " + err.Error())
 				}
 			case BatchUpdateTypeChannelUsedQuota:
 				updateChannelUsedQuota(key, value)
@@ -121,7 +122,7 @@ func batchUpdate() {
 	for key := range userIDs {
 		updateUserQuotaUsedQuotaAndRequestCount(key, userQuotaStore[key], usedQuotaStore[key], requestCountStore[key])
 	}
-	common.SysLog(common.LogText("batch update finished"))
+	common.SysLog("batch update finished")
 }
 
 func RecordExist(err error) (bool, error) {

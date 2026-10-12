@@ -109,11 +109,8 @@ type Engine struct {
 	module    *moejs.Module
 	pool      chan *runtimeInstance
 	semaphore chan struct{}
-	// parked bounds the runtimes that lent their slot to other calls while
-	// utils.fetch waits on the network; its capacity is the concurrency.
-	parked  chan struct{}
-	hooksMu sync.RWMutex
-	hooks   map[hookKey]moejs.Hook
+	hooksMu   sync.RWMutex
+	hooks     map[hookKey]moejs.Hook
 	// exports holds the exports that were not undefined once the module
 	// loaded; it is written only by Compile.
 	exports map[string]struct{}
@@ -134,8 +131,6 @@ const maxCachedHooks = 256
 type runtimeInstance struct {
 	runtime    *moejs.Runtime
 	logContext *runtimeLogContext
-	// call is the hook call running on the runtime, nil between calls.
-	call *runtimeCall
 }
 
 type runtimeLogContext struct {
@@ -181,7 +176,6 @@ func Compile(source string, options Options) (*Engine, error) {
 		log:       options.Log,
 		module:    module,
 		semaphore: make(chan struct{}, concurrency),
-		parked:    make(chan struct{}, concurrency),
 		pool:      make(chan *runtimeInstance, concurrency),
 		hooks:     make(map[hookKey]moejs.Hook),
 		exports:   make(map[string]struct{}),
@@ -223,8 +217,8 @@ func (e *Engine) Export(ctx context.Context, exportName string) (any, error) {
 		}
 	}()
 	timedOut := errors.New("plugin export timed out")
-	watchdog := watchRuntimeContext(instance.runtime, ctx, e.timeout, timedOut)
-	defer watchdog.stop()
+	stopInterrupt := watchRuntimeContext(instance.runtime, ctx, e.timeout, timedOut)
+	defer stopInterrupt()
 	value, found := instance.runtime.Export(exportName)
 	if !found || value.IsUndefined() {
 		return nil, fmt.Errorf("plugin export %q not found", exportName)
@@ -279,8 +273,8 @@ func (e *Engine) HasCallablePath(ctx context.Context, exportName string, members
 		}
 	}()
 	timedOut := errors.New("plugin inspection timed out")
-	watchdog := watchRuntimeContext(instance.runtime, ctx, e.timeout, timedOut)
-	defer watchdog.stop()
+	stopInterrupt := watchRuntimeContext(instance.runtime, ctx, e.timeout, timedOut)
+	defer stopInterrupt()
 	found, err := instance.runtime.Has(hook)
 	if err == nil {
 		return found, nil
@@ -392,9 +386,7 @@ func (e *Engine) call(ctx context.Context, opts callOptions, exportName string, 
 	if err := e.acquireCallSlot(ctx, opts.admissionTimeout); err != nil {
 		return nil, nil, err
 	}
-	call := &runtimeCall{engine: e, ctx: ctx, holdsSlot: true}
-	// utils.fetch may lend the slot out; return what the call holds now.
-	defer call.release()
+	defer func() { <-e.semaphore }()
 
 	hook, err := e.hook(exportName, members)
 	if err != nil {
@@ -407,14 +399,10 @@ func (e *Engine) call(ctx context.Context, opts callOptions, exportName string, 
 	if err != nil {
 		return nil, nil, err
 	}
-	call.runtime, call.hook = instance.runtime, hook.Name()
-	call.fetcher, _ = ctx.Value(fetcherContextKey{}).(Fetcher)
-	instance.call = call
 	reusable := true
 	defer func() {
 		instance.runtime.ClearInterrupt()
 		instance.logContext.context = nil
-		instance.call = nil
 		if reusable {
 			// An idle pooled runtime must not keep this call's request
 			// data alive.
@@ -443,10 +431,8 @@ func (e *Engine) call(ctx context.Context, opts callOptions, exportName string, 
 	}
 
 	timedOut := errors.New("plugin call timed out")
-	call.watchdog = watchRuntimeContext(instance.runtime, ctx, e.timeout, timedOut)
-	// utils.fetch pauses and restarts the watchdog; stop whichever watch is
-	// current when the call ends.
-	defer call.watchdog.stop()
+	stopInterrupt := watchRuntimeContext(instance.runtime, ctx, e.timeout, timedOut)
+	defer stopInterrupt()
 
 	value, err := instance.runtime.Call(hook, callArgs...)
 	var interrupted *moejs.InterruptedError
@@ -731,72 +717,20 @@ func (e *Engine) getRuntime(ctx context.Context) (*runtimeInstance, error) {
 	}
 }
 
-// runtimeWatchdog interrupts a runtime with timeoutError once it has run for
-// its timeout, or with the context's cause once ctx ends. utils.fetch pauses
-// it, so the timeout counts JavaScript time only. A timeout callback must
-// finish before its runtime can be reused: merely stopping a timer does not
-// wait for an already-started Interrupt call.
-type runtimeWatchdog struct {
-	runtime      *moejs.Runtime
-	ctx          context.Context
-	timeoutError error
-	remaining    time.Duration
-	started      time.Time
-	watch        context.Context
-	stopWatch    func() bool
-	cancel       context.CancelFunc
-	interrupted  chan struct{}
-	paused       bool
-}
-
-func watchRuntimeContext(runtime *moejs.Runtime, ctx context.Context, timeout time.Duration, timeoutError error) *runtimeWatchdog {
-	watchdog := &runtimeWatchdog{runtime: runtime, ctx: ctx, timeoutError: timeoutError, remaining: timeout}
-	watchdog.start()
-	return watchdog
-}
-
-func (w *runtimeWatchdog) start() {
-	watch, cancel := context.WithTimeoutCause(w.ctx, w.remaining, w.timeoutError)
+// A timeout callback must finish before its runtime can be reused. Merely
+// stopping a timer does not wait for an already-started Interrupt call.
+func watchRuntimeContext(runtime *moejs.Runtime, ctx context.Context, timeout time.Duration, timeoutError error) func() {
+	callContext, cancel := context.WithTimeoutCause(ctx, timeout, timeoutError)
 	interrupted := make(chan struct{})
-	w.stopWatch = context.AfterFunc(watch, func() {
-		w.runtime.Interrupt(context.Cause(watch))
+	stop := context.AfterFunc(callContext, func() {
+		runtime.Interrupt(context.Cause(callContext))
 		close(interrupted)
 	})
-	w.watch, w.cancel, w.interrupted = watch, cancel, interrupted
-	w.started, w.paused = time.Now(), false
-}
-
-func (w *runtimeWatchdog) stop() {
-	if w.paused {
-		return
-	}
-	if !w.stopWatch() {
-		<-w.interrupted
-	}
-	w.cancel()
-}
-
-// pause stops the clock while a host function waits. It reports false when
-// the watchdog already fired: its interrupt is then ending the call, and the
-// host function must return instead of waiting.
-func (w *runtimeWatchdog) pause() bool {
-	if !w.stopWatch() {
-		<-w.interrupted
-		return false
-	}
-	w.cancel()
-	w.remaining -= time.Since(w.started)
-	w.paused = true
-	return true
-}
-
-// resume restarts the clock with the time left at pause and the same timeout
-// cause. When the time is up or ctx ended meanwhile, it waits for the
-// interrupt that follows, so the host function can return it.
-func (w *runtimeWatchdog) resume() {
-	w.start()
-	if w.watch.Err() != nil {
-		<-w.interrupted
+	return func() {
+		if !stop() {
+			<-interrupted
+		}
+		cancel()
 	}
 }
 
@@ -805,7 +739,6 @@ func (e *Engine) newRuntime(ctx context.Context) (*runtimeInstance, error) {
 	// so eval and the Function constructors throw an EvalError.
 	runtime := moejs.NewRuntime(moejs.Options{DisableDynamicCode: true})
 	logContext := &runtimeLogContext{context: ctx}
-	instance := &runtimeInstance{runtime: runtime, logContext: logContext}
 	logOutput := e.log
 	if logOutput == nil {
 		logOutput = func(message string) {
@@ -814,13 +747,13 @@ func (e *Engine) newRuntime(ctx context.Context) (*runtimeInstance, error) {
 	}
 	if err := injectGlobals(runtime, func() string {
 		return fmt.Sprintf("[plugin:%s@%s]", e.key, e.version)
-	}, e.now, logOutput, func() *runtimeCall { return instance.call }); err != nil {
+	}, e.now, logOutput); err != nil {
 		return nil, fmt.Errorf("inject plugin utils: %w", err)
 	}
 	timedOut := errors.New("plugin initialization timed out")
-	watchdog := watchRuntimeContext(runtime, ctx, e.timeout, timedOut)
+	stopInterrupt := watchRuntimeContext(runtime, ctx, e.timeout, timedOut)
 	err := runtime.Load(e.module)
-	watchdog.stop()
+	stopInterrupt()
 	runtime.ClearInterrupt()
 	var interrupted *moejs.InterruptedError
 	if errors.As(err, &interrupted) {
@@ -829,7 +762,7 @@ func (e *Engine) newRuntime(ctx context.Context) (*runtimeInstance, error) {
 	if err != nil {
 		return nil, fmt.Errorf("evaluate plugin: %w", err)
 	}
-	return instance, nil
+	return &runtimeInstance{runtime: runtime, logContext: logContext}, nil
 }
 
 func sourceWithoutCommentsAndStrings(source string) string {

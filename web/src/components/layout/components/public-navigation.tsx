@@ -47,7 +47,9 @@ export function PublicNavigation({
   // Use the same logic as AppHeader: prioritize dynamic links from backend
   const dynamicLinks = useTopNavLinks()
   const defaultLinks = providedLinks || defaultTopNavLinks
-  const links = dynamicLinks.length > 0 ? dynamicLinks : defaultLinks
+  const links = (dynamicLinks.length > 0 ? dynamicLinks : defaultLinks).filter(
+    (l) => !l.external && !l.href.startsWith('http')
+  )
 
   return (
     <nav className={cn('hidden items-center gap-1 md:flex', className)}>

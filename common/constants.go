@@ -12,7 +12,7 @@ import (
 
 var StartTime = time.Now().Unix() // unit: second
 var Version = "v0.0.0"            // this hard coding will be replaced automatically when building, no need to manually change
-var SystemName = "New API"
+var SystemName = "晤创AI"
 var Footer = ""
 var Logo = ""
 var TopUpLink = ""
@@ -35,11 +35,6 @@ var DefaultCollapseSidebar = false // default value of collapse sidebar
 var SessionSecret = uuid.New().String()
 var CryptoSecret = uuid.New().String()
 var SessionCookieSecure = false
-
-// DefaultLanguage is the DEFAULT_LANGUAGE environment variable: the language of
-// server log lines and of text for a reader who states no language: en, zh-CN
-// or zh-TW. English when empty.
-var DefaultLanguage string
 var SessionCookieTrustedURLs []string
 
 const (

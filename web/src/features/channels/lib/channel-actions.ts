@@ -21,7 +21,6 @@ import i18next from 'i18next'
 import { toast } from 'sonner'
 
 import { handleServerError } from '@/lib/handle-server-error'
-import { getServerMessage } from '@/lib/server-error-message'
 
 import {
   copyChannel,
@@ -317,8 +316,7 @@ export async function handleTestChannel(
       }
       onTestComplete?.(true, responseTime)
     } else {
-      const errorMsg =
-        getServerMessage(response) || i18next.t(ERROR_MESSAGES.TEST_FAILED)
+      const errorMsg = response.message || i18next.t(ERROR_MESSAGES.TEST_FAILED)
       if (!options?.silent) {
         handleServerError(response, undefined, {
           title: i18next.t('{{target}} test failed', { target }),
@@ -330,10 +328,9 @@ export async function handleTestChannel(
       onTestComplete?.(false, responseTime, errorMsg, response.error_code)
     }
   } catch (_error: unknown) {
-    const err = _error as { response?: { data?: unknown } }
+    const err = _error as { response?: { data?: { message?: string } } }
     const errorMsg =
-      getServerMessage(err?.response?.data) ||
-      i18next.t(ERROR_MESSAGES.TEST_FAILED)
+      err?.response?.data?.message || i18next.t(ERROR_MESSAGES.TEST_FAILED)
     const target = getChannelTestLabel(options)
     if (!options?.silent) {
       handleServerError(_error, undefined, {

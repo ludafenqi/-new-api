@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
@@ -42,7 +43,7 @@ func Enable2FA(c *gin.Context) {
 	}
 	var req Verify2FARequest
 	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
-		common.ApiErrorT(c, "Invalid parameters")
+		common.ApiErrorMsg(c, "参数错误")
 		return
 	}
 	if err := service.FinishTwoFASetup(identity, req.FlowToken, req.Code); err != nil {
@@ -78,7 +79,11 @@ func Disable2FA(c *gin.Context) {
 	// 记录操作日志
 	recordUserSecurityAudit(c, userId, "user.2fa_disable_self", nil)
 
-	common.ApiSuccessT(c, "Two-factor authentication disabled", authRotationData(bundle))
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "两步验证已禁用",
+		"data":    authRotationData(bundle),
+	})
 }
 
 // Get2FAStatus 获取用户2FA状态
@@ -103,7 +108,7 @@ func Get2FAStatus(c *gin.Context) {
 			// 获取剩余备用码数量
 			backupCount, err := model.GetUnusedBackupCodeCount(userId)
 			if err != nil {
-				common.SysLog(common.LogText("failed to count backup codes: %s", err.Error()))
+				common.SysLog("获取备用码数量失败: " + err.Error())
 			} else {
 				status["backup_codes_remaining"] = backupCount
 			}
@@ -127,15 +132,21 @@ func RegenerateBackupCodes(c *gin.Context) {
 	// 生成新的备用码
 	backupCodes, err := common.GenerateBackupCodes()
 	if err != nil {
-		common.ApiErrorT(c, "Failed to regenerate backup codes")
-		common.SysLog(common.LogText("failed to generate backup codes: %s", err.Error()))
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "生成备用码失败",
+		})
+		common.SysLog("生成备用码失败: " + err.Error())
 		return
 	}
 
 	// 保存新的备用码并原子推进用户鉴权版本
 	if err := model.ReplaceBackupCodesForSession(identity, backupCodes); err != nil {
-		common.ApiErrorT(c, "Failed to save backup codes")
-		common.SysLog(common.LogText("failed to save backup codes: %s", err.Error()))
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "保存备用码失败",
+		})
+		common.SysLog("保存备用码失败: " + err.Error())
 		return
 	}
 	bundle, err := service.AdvanceCurrentSessionToUserVersion(identity, "twofa_backup_codes_regenerated")
@@ -149,7 +160,11 @@ func RegenerateBackupCodes(c *gin.Context) {
 
 	data := authRotationData(bundle)
 	data["backup_codes"] = backupCodes
-	common.ApiSuccessT(c, "Backup codes regenerated successfully", data)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "备用码重新生成成功",
+		"data":    data,
+	})
 }
 
 // Verify2FALogin 登录时验证2FA
@@ -177,14 +192,17 @@ func AdminDisable2FA(c *gin.Context) {
 	userIdStr := c.Param("id")
 	userId, err := strconv.Atoi(userIdStr)
 	if err != nil || userId <= 0 {
-		common.ApiErrorT(c, "Invalid user ID")
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "用户ID格式错误",
+		})
 		return
 	}
 
 	// 检查目标用户权限
 	targetUser, err := model.GetUserById(userId, false)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		common.ApiErrorT(c, "User does not exist")
+		common.ApiErrorI18n(c, i18n.MsgUserNotExists)
 		return
 	}
 	if err != nil {
@@ -194,7 +212,10 @@ func AdminDisable2FA(c *gin.Context) {
 
 	myRole := c.GetInt("role")
 	if !canManageTargetRole(myRole, targetUser.Role) {
-		common.ApiErrorT(c, "No permission to change the 2FA settings of users at the same or higher level")
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无权操作同级或更高级用户的2FA设置",
+		})
 		return
 	}
 	authorization := requireAdminUserProof(c, service.VerificationScopeAdminUserTwoFADisable, service.AdminUserContext{UserID: userId})
@@ -205,7 +226,10 @@ func AdminDisable2FA(c *gin.Context) {
 	// 禁用2FA
 	if err := model.DisableTwoFAWithAuthVersion(userId); err != nil {
 		if errors.Is(err, model.ErrTwoFANotEnabled) {
-			common.ApiErrorT(c, "Two-factor authentication is not enabled.")
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "用户未启用2FA",
+			})
 			return
 		}
 		writeSecurityOperationError(c, err)
@@ -221,5 +245,8 @@ func AdminDisable2FA(c *gin.Context) {
 		"verification_method": authorization.Method,
 	})
 
-	common.ApiSuccessT(c, "Two-factor authentication reset", nil)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "用户2FA已被强制禁用",
+	})
 }

@@ -86,12 +86,10 @@ export function useTopNavLinks(): TopNavLink[] {
     links.push({ title: t('Rankings'), href: '/rankings', requiresAuth })
   }
 
-  // Docs (supports external links)
+  // Docs (only allowed if internal route)
   if (modules?.docs !== false) {
-    if (docsLink) {
-      links.push({ title: t('Docs'), href: docsLink, external: true })
-    } else {
-      links.push({ title: t('Docs'), href: '/docs' })
+    if (docsLink && !docsLink.startsWith('http')) {
+      links.push({ title: t('Docs'), href: docsLink })
     }
   }
 
@@ -100,5 +98,7 @@ export function useTopNavLinks(): TopNavLink[] {
     links.push({ title: t('About'), href: '/about' })
   }
 
-  return links
+  return links.filter(
+    (link) => !link.external && !link.href.startsWith('http')
+  )
 }

@@ -2,6 +2,7 @@ package operation_setting
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"sort"
 	"strings"
@@ -143,25 +144,25 @@ func isValidToolPrice(price float64) bool {
 func decodeToolPricesJSON(value string, ignoreInvalidEntries bool) (map[string]float64, error) {
 	rawValue := json.RawMessage(strings.TrimSpace(value))
 	if common.GetJsonType(rawValue) != "object" {
-		return nil, common.NewMessage("Tool prices must be a JSON object")
+		return nil, fmt.Errorf("工具价格必须是 JSON 对象")
 	}
 
 	var rawPrices map[string]json.RawMessage
 	if err := common.Unmarshal(rawValue, &rawPrices); err != nil {
-		return nil, common.NewMessage("Failed to parse tool prices: {{error}}", map[string]any{"error": err.Error()})
+		return nil, fmt.Errorf("解析工具价格失败: %w", err)
 	}
 
 	prices := make(map[string]float64, len(rawPrices))
 	for name, rawPrice := range rawPrices {
 		var entryErr error
 		if common.GetJsonType(rawPrice) != "number" {
-			entryErr = common.NewMessage(`Tool price "{{name}}" must be a non-negative number`, map[string]any{"name": name})
+			entryErr = fmt.Errorf("工具价格 %q 必须是非负数字", name)
 		} else {
 			var price float64
 			if err := common.Unmarshal(rawPrice, &price); err != nil {
-				entryErr = common.NewMessage(`Failed to parse tool price "{{name}}": {{error}}`, map[string]any{"name": name, "error": err.Error()})
+				entryErr = fmt.Errorf("解析工具价格 %q 失败: %w", name, err)
 			} else if !isValidToolPrice(price) {
-				entryErr = common.NewMessage(`Tool price "{{name}}" must be a finite non-negative number`, map[string]any{"name": name})
+				entryErr = fmt.Errorf("工具价格 %q 必须是有限的非负数字", name)
 			} else {
 				prices[name] = price
 			}
@@ -191,7 +192,7 @@ func ValidateToolPricesJSON(value string) error {
 func LoadToolPricesFromJSONString(value string) {
 	prices, err := decodeToolPricesJSON(value, true)
 	if err != nil {
-		common.SysError(common.LogText("failed to load tool prices, using hardcoded fallbacks: %s", err.Error()))
+		common.SysError("加载工具价格失败，将使用硬编码兜底: " + err.Error())
 		prices = make(map[string]float64)
 	}
 	toolPriceSetting.Prices = prices

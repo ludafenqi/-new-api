@@ -97,7 +97,9 @@ export function PublicHeader(props: PublicHeaderProps) {
   const user = auth.user
   const isAuthenticated = !!user
   const displaySiteName = customSiteName || systemName
-  const links = dynamicLinks.length > 0 ? dynamicLinks : navLinks
+  const links = (dynamicLinks.length > 0 ? dynamicLinks : navLinks).filter(
+    (l) => !l.external && !l.href.startsWith('http')
+  )
 
   let logoContent: ReactNode = (
     <HeaderLogo

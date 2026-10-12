@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 
 var (
 	ErrPasskeyNotFound         = errors.New("passkey credential not found")
-	ErrFriendlyPasskeyNotFound = errors.New("Passkey verification failed. Please try again or contact the administrator.")
+	ErrFriendlyPasskeyNotFound = errors.New("Passkey 验证失败，请重试或联系管理员")
 )
 
 type PasskeyCredential struct {
@@ -123,7 +124,7 @@ func NewPasskeyCredentialFromWebAuthn(userID int, credential *webauthn.Credentia
 
 func GetPasskeyByUserID(userID int) (*PasskeyCredential, error) {
 	if userID == 0 {
-		common.SysLog(common.LogText("GetPasskeyByUserID: empty user ID"))
+		common.SysLog("GetPasskeyByUserID: empty user ID")
 		return nil, ErrFriendlyPasskeyNotFound
 	}
 	var credential PasskeyCredential
@@ -133,7 +134,7 @@ func GetPasskeyByUserID(userID int) (*PasskeyCredential, error) {
 			return nil, ErrPasskeyNotFound
 		}
 		// 只有真正的数据库错误才记录日志
-		common.SysLog(common.LogText("GetPasskeyByUserID: database error for user %d: %v", userID, err))
+		common.SysLog(fmt.Sprintf("GetPasskeyByUserID: database error for user %d: %v", userID, err))
 		return nil, ErrFriendlyPasskeyNotFound
 	}
 	return &credential, nil
@@ -141,7 +142,7 @@ func GetPasskeyByUserID(userID int) (*PasskeyCredential, error) {
 
 func GetPasskeyByCredentialID(credentialID []byte) (*PasskeyCredential, error) {
 	if len(credentialID) == 0 {
-		common.SysLog(common.LogText("GetPasskeyByCredentialID: empty credential ID"))
+		common.SysLog("GetPasskeyByCredentialID: empty credential ID")
 		return nil, ErrFriendlyPasskeyNotFound
 	}
 
@@ -149,10 +150,10 @@ func GetPasskeyByCredentialID(credentialID []byte) (*PasskeyCredential, error) {
 	var credential PasskeyCredential
 	if err := DB.Where("credential_id = ?", credIDStr).First(&credential).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			common.SysLog(common.LogText("GetPasskeyByCredentialID: passkey not found for credential ID length %d", len(credentialID)))
+			common.SysLog(fmt.Sprintf("GetPasskeyByCredentialID: passkey not found for credential ID length %d", len(credentialID)))
 			return nil, ErrFriendlyPasskeyNotFound
 		}
-		common.SysLog(common.LogText("GetPasskeyByCredentialID: database error for credential ID: %v", err))
+		common.SysLog(fmt.Sprintf("GetPasskeyByCredentialID: database error for credential ID: %v", err))
 		return nil, ErrFriendlyPasskeyNotFound
 	}
 
@@ -164,7 +165,7 @@ func GetPasskeyByCredentialID(credentialID []byte) (*PasskeyCredential, error) {
 // transports and attestation metadata) is immutable on this path.
 func UpdatePasskeyAssertionState(userID int, credential *webauthn.Credential, lastUsedAt time.Time, rpID string) error {
 	if userID <= 0 || credential == nil || len(credential.ID) == 0 || lastUsedAt.IsZero() || rpID == "" {
-		return errors.New("failed to save the Passkey, please try again")
+		return fmt.Errorf("Passkey 保存失败，请重试")
 	}
 	credentialID := base64.StdEncoding.EncodeToString(credential.ID)
 	passkeyOptionMutex.Lock()
@@ -209,12 +210,12 @@ func UpdatePasskeyAssertionState(userID int, credential *webauthn.Credential, la
 
 func upsertPasskeyCredentialWithTx(tx *gorm.DB, credential *PasskeyCredential) error {
 	if err := tx.Unscoped().Where("user_id = ?", credential.UserID).Delete(&PasskeyCredential{}).Error; err != nil {
-		common.SysLog(common.LogText("UpsertPasskeyCredential: failed to delete existing credential for user %d: %v", credential.UserID, err))
-		return errors.New("failed to save the Passkey, please try again")
+		common.SysLog(fmt.Sprintf("UpsertPasskeyCredential: failed to delete existing credential for user %d: %v", credential.UserID, err))
+		return fmt.Errorf("Passkey 保存失败，请重试")
 	}
 	if err := tx.Create(credential).Error; err != nil {
-		common.SysLog(common.LogText("UpsertPasskeyCredential: failed to create credential for user %d: %v", credential.UserID, err))
-		return errors.New("failed to save the Passkey, please try again")
+		common.SysLog(fmt.Sprintf("UpsertPasskeyCredential: failed to create credential for user %d: %v", credential.UserID, err))
+		return fmt.Errorf("Passkey 保存失败，请重试")
 	}
 	return nil
 }
@@ -231,7 +232,7 @@ func RegisterPasskeyForSession(identity AuthSessionIdentity, credential *Passkey
 
 func upsertPasskeyCredentialWithAuthVersion(credential *PasskeyCredential, identity *AuthSessionIdentity) error {
 	if credential == nil || credential.UserID <= 0 {
-		return errors.New("failed to save the Passkey, please try again")
+		return fmt.Errorf("Passkey 保存失败，请重试")
 	}
 	passkeyOptionMutex.Lock()
 	defer passkeyOptionMutex.Unlock()
@@ -272,7 +273,7 @@ func DeletePasskeyForSession(identity AuthSessionIdentity) error {
 
 func deletePasskeyWithAuthVersion(userID int, identity *AuthSessionIdentity) error {
 	if userID == 0 {
-		return errors.New("failed to delete the Passkey, please try again")
+		return fmt.Errorf("删除失败，请重试")
 	}
 	if err := DB.Transaction(func(tx *gorm.DB) error {
 		if identity != nil {

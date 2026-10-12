@@ -2,6 +2,7 @@ package common
 
 import (
 	"context"
+	"fmt"
 	"math"
 
 	"github.com/bytedance/gopkg/util/gopool"
@@ -15,7 +16,7 @@ func init() {
 		if stopChan, ok := ctx.Value("stop_chan").(chan bool); ok {
 			SafeSendBool(stopChan, true)
 		}
-		SysError(LogText("panic in gopool.RelayPool: %v", i))
+		SysError(fmt.Sprintf("panic in gopool.RelayPool: %v", i))
 	})
 }
 

@@ -20,7 +20,7 @@ func VerifyLogin(c *gin.Context) {
 		Code      string `json:"code"`
 	}
 	if common.DecodeJson(c.Request.Body, &request) != nil || request.FlowToken == "" || request.Code == "" {
-		common.ApiErrorT(c, "Invalid parameters")
+		common.ApiErrorMsg(c, "参数错误")
 		return
 	}
 	if request.Method == "" {
@@ -44,7 +44,7 @@ func LoginPasskeyBegin(c *gin.Context) {
 		RPID      string `json:"rp_id"`
 	}
 	if common.DecodeJson(c.Request.Body, &request) != nil || request.FlowToken == "" {
-		common.ApiErrorT(c, "Invalid parameters")
+		common.ApiErrorMsg(c, "参数错误")
 		return
 	}
 	verification, err := service.RequireLoginVerification(request.FlowToken, service.VerificationMethodPasskey)
@@ -90,7 +90,7 @@ func LoginPasskeyFinish(c *gin.Context) {
 		Credential       json.RawMessage `json:"credential"`
 	}
 	if common.DecodeJson(c.Request.Body, &request) != nil || request.FlowToken == "" || request.PasskeyFlowToken == "" || len(request.Credential) == 0 {
-		common.ApiErrorT(c, "Invalid parameters")
+		common.ApiErrorMsg(c, "参数错误")
 		return
 	}
 	verification, err := service.RequireLoginVerification(request.FlowToken, service.VerificationMethodPasskey)
